@@ -491,22 +491,6 @@ The module includes comprehensive health monitoring:
 │   │   ├── variables.tf
 │   │   └── terraform.tfvars.example
 .
-### Testing
-
-```bash
-# Run validation tests
-make validate
-
-# Run security scans
-make security-scan
-
-# Run integration tests
-make test-integration
-
-# Run all tests
-make test
-```
-
 ## Changelog
 
 ### v1.0.0 (Latest)
