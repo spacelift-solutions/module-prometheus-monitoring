@@ -1,0 +1,422 @@
+# Prometheus Helm Values Template for GKE
+# This template is processed by Terraform with variable substitution
+
+# Global Configuration
+fullnameOverride: "prometheus"
+namespaceOverride: "${namespace}"
+
+# Common Labels
+commonLabels:
+  app.kubernetes.io/name: "spacelift-monitoring"
+  app.kubernetes.io/component: "monitoring"
+  app.kubernetes.io/managed-by: "terraform"
+
+# Prometheus Operator Configuration
+prometheusOperator:
+  enabled: true
+  serviceAccount:
+    create: false
+    name: "${service_account}"
+  
+  # Security Context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    fsGroup: 65534
+  
+  # Resource Configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Prometheus Server Configuration
+prometheus:
+  enabled: true
+  
+  prometheusSpec:
+    # Storage Configuration
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "${storage_class}"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: "${prometheus_storage_size}"
+    
+    # Retention Configuration
+    retention: "${retention_days}d"
+    retentionSize: "45GB"
+    
+    # Resource Configuration
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+    
+    # Security Context
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      runAsGroup: 65534
+    
+    # Service Account
+    serviceAccount:
+      create: false
+      name: "${service_account}"
+    
+    # External URL
+    externalUrl: "${external_url}"
+    
+    # Configuration
+    scrapeInterval: "${scrape_interval}"
+    evaluationInterval: "${evaluation_interval}"
+    
+    # Service Monitor Selector
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    
+    # Rule Selector
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+    
+    # Pod Monitor Selector
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    
+    # Probe Selector
+    probeSelectorNilUsesHelmValues: false
+    probeSelector: {}
+    probeNamespaceSelector: {}
+    
+    # Additional Scrape Configs for Spacelift Exporter
+    additionalScrapeConfigs:
+      - job_name: 'spacelift-exporter'
+        static_configs:
+          - targets: ['spacelift-exporter.${namespace}.svc.cluster.local:9953']
+        scrape_interval: ${scrape_interval}
+        scrape_timeout: 30s
+        metrics_path: /metrics
+        
+    # Pod Anti-Affinity for HA
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                - prometheus
+            topologyKey: kubernetes.io/hostname
+
+  # Prometheus Service Configuration
+  service:
+    type: ClusterIP
+    port: 9090
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9090"
+
+  %{ if enable_ingress }
+  # Ingress Configuration
+  ingress:
+    enabled: true
+    ingressClassName: "${ingress_class}"
+    annotations:
+      %{ if enable_ssl }
+      cert-manager.io/cluster-issuer: "${ssl_cert_issuer}"
+      %{ endif }
+      nginx.ingress.kubernetes.io/rewrite-target: /
+    hosts:
+      - host: prometheus.${domain_name}
+        paths:
+          - path: /
+            pathType: Prefix
+    %{ if enable_ssl }
+    tls:
+      - secretName: prometheus-tls
+        hosts:
+          - prometheus.${domain_name}
+    %{ endif }
+  %{ endif }
+
+# Grafana Configuration
+grafana:
+  enabled: true
+  
+  # Admin Configuration
+  adminPassword: "admin123!" # Should be changed in production
+  
+  # Storage Configuration
+  persistence:
+    enabled: true
+    storageClassName: "${storage_class}"
+    size: "${grafana_storage_size}"
+    accessModes:
+      - ReadWriteOnce
+  
+  # Service Account
+  serviceAccount:
+    create: false
+    name: "${service_account}"
+  
+  # Security Context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 472
+    runAsGroup: 472
+    fsGroup: 472
+  
+  # Resource Configuration
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  
+  # External URL
+  grafana.ini:
+    server:
+      root_url: "${grafana_external_url}"
+      serve_from_sub_path: true
+    security:
+      disable_gravatar: true
+      cookie_secure: true
+      cookie_samesite: strict
+    auth.anonymous:
+      enabled: false
+    log:
+      mode: console
+      level: info
+  
+  # Data Sources
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          uid: prometheus
+          url: http://prometheus-kube-prometheus-prometheus.${namespace}.svc.cluster.local:9090
+          access: proxy
+          isDefault: true
+          jsonData:
+            httpMethod: POST
+            manageAlerts: true
+            prometheusType: Prometheus
+            prometheusVersion: 2.45.0
+  
+  # Dashboard Providers
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'spacelift'
+          orgId: 1
+          folder: 'Spacelift'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/spacelift
+        - name: 'kubernetes'
+          orgId: 1
+          folder: 'Kubernetes'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/kubernetes
+  
+  # Default Dashboards
+  dashboards:
+    kubernetes:
+      k8s-cluster-rsrc-use:
+        gnetId: 15757
+        revision: 1
+        datasource: Prometheus
+      k8s-node-rsrc-use:
+        gnetId: 15759
+        revision: 1
+        datasource: Prometheus
+      k8s-resources-cluster:
+        gnetId: 15760
+        revision: 1
+        datasource: Prometheus
+      k8s-resources-namespace:
+        gnetId: 15761
+        revision: 1
+        datasource: Prometheus
+    
+    spacelift:
+      # Placeholder for custom Spacelift dashboard
+      # Will be populated when custom dashboard JSON is provided
+  
+  %{ if enable_ingress }
+  # Ingress Configuration
+  ingress:
+    enabled: true
+    ingressClassName: "${ingress_class}"
+    annotations:
+      %{ if enable_ssl }
+      cert-manager.io/cluster-issuer: "${ssl_cert_issuer}"
+      %{ endif }
+      nginx.ingress.kubernetes.io/rewrite-target: /
+    hosts:
+      - grafana.${domain_name}
+    %{ if enable_ssl }
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.${domain_name}
+    %{ endif }
+  %{ endif }
+
+# AlertManager Configuration
+alertmanager:
+  enabled: true
+  
+  alertmanagerSpec:
+    # Storage Configuration
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "${storage_class}"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: "10Gi"
+    
+    # Resource Configuration
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    
+    # Security Context
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+    
+    # Service Account
+    serviceAccount:
+      create: false
+      name: "${service_account}"
+
+# Node Exporter Configuration
+nodeExporter:
+  enabled: true
+  
+  # Service Account
+  serviceAccount:
+    create: false
+    name: "${service_account}"
+
+# Kube State Metrics Configuration
+kubeStateMetrics:
+  enabled: true
+
+# Prometheus Node Exporter Configuration
+prometheus-node-exporter:
+  enabled: true
+  
+  # Security Context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+
+# Kube Proxy Configuration
+kubeProxy:
+  enabled: false
+
+# Kube Controller Manager Configuration
+kubeControllerManager:
+  enabled: false
+
+# Kube Scheduler Configuration
+kubeScheduler:
+  enabled: false
+
+# Kube ETCD Configuration
+kubeEtcd:
+  enabled: false
+
+# Core DNS Configuration
+coreDns:
+  enabled: true
+
+# Kube API Server Configuration
+kubeApiServer:
+  enabled: true
+
+# Kubelet Configuration
+kubelet:
+  enabled: true
+  
+  # Service Monitor Configuration
+  serviceMonitor:
+    cAdvisor: true
+    probes: true
+    resource: true
+    resourcePath: "/metrics/resource/v1alpha1"
+
+# Default Rules Configuration
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserver: true
+    kubeApiserverAvailability: true
+    kubeApiserverSlos: true
+    kubelet: true
+    kubeProxy: false
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeScheduler: false
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+    windows: false
+
+# Global Configuration
+global:
+  # Image Registry
+  imageRegistry: ""
+  
+  # Image Pull Secrets
+  imagePullSecrets: []
+  
+  # Cluster Domain
+  clusterDomain: cluster.local
