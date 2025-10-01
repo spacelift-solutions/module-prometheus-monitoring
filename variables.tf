@@ -14,6 +14,12 @@ variable "gke_cluster_location" {
   type        = string
 }
 
+variable "cluster_exists" {
+  description = "Whether the GKE cluster already exists (set to false for initial deployment)"
+  type        = bool
+  default     = true
+}
+
 # Monitoring Configuration
 variable "monitoring_namespace" {
   description = "Kubernetes namespace for monitoring components"
@@ -338,11 +344,64 @@ variable "backup_config" {
     retention_days     = number
     gcs_bucket_name   = string
     backup_encryption = bool
+    enable_local_backup = bool
+    backup_storage_size = string
   })
   default = {
     schedule           = "0 2 * * *"
     retention_days     = 30
     gcs_bucket_name   = ""
     backup_encryption = true
+    enable_local_backup = false
+    backup_storage_size = "50Gi"
   }
+}
+
+variable "gcp_service_account_secret_name" {
+  description = "Name of the Kubernetes secret containing GCP service account credentials"
+  type        = string
+  default     = ""
+}
+
+# GKE-specific optimization variables
+variable "enable_gke_optimizations" {
+  description = "Enable GKE-specific optimizations"
+  type        = bool
+  default     = true
+}
+
+variable "enable_gke_metrics_collection" {
+  description = "Enable collection of GKE-specific metrics"
+  type        = bool
+  default     = true
+}
+
+variable "enable_gke_cloud_monitoring" {
+  description = "Enable integration with Google Cloud Monitoring"
+  type        = bool
+  default     = false
+}
+
+variable "enable_gke_node_affinity" {
+  description = "Enable node affinity for GKE node pools"
+  type        = bool
+  default     = false
+}
+
+variable "preferred_node_pools" {
+  description = "Preferred GKE node pools for monitoring workloads"
+  type        = list(string)
+  default     = ["monitoring-pool", "default-pool"]
+}
+
+variable "enable_gke_spot_nodes" {
+  description = "Enable support for GKE spot/preemptible nodes"
+  type        = bool
+  default     = false
+}
+
+variable "gcp_kms_key_id" {
+  description = "GCP KMS key ID for encryption"
+  type        = string
+  default     = ""
 }

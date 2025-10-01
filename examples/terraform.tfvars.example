@@ -1,0 +1,25 @@
+# Example Terraform Variables for Spacelift Monitoring
+# Copy this file to terraform.tfvars and update the values
+
+# GCP Configuration
+project_id           = "your-gcp-project-id"
+region              = "europe-west4"
+gke_cluster_name     = "demo-env-gke-cluster"
+gke_cluster_location = "europe-west4"  # Use region, not zone
+
+# Spacelift Configuration
+spacelift_api_endpoint   = "https://your-account.app.spacelift.io"
+spacelift_api_key_id     = "your-spacelift-key-id"
+spacelift_api_key_secret = "your-spacelift-key-secret"
+
+# Optional Configuration
+enable_backup            = false
+enable_workload_identity = false
+environment             = "dev"
+
+tags = {
+  Environment = "development"
+  Team        = "platform"
+  Purpose     = "spacelift-monitoring"
+  ManagedBy   = "terraform"
+}

@@ -2,22 +2,23 @@
 # This module deploys a comprehensive monitoring solution for Spacelift on GKE
 # including Prometheus, Grafana, and the Spacelift Prometheus exporter
 
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
+# Local values for consistent naming
+locals {
+  name_prefix = "spacelift-monitoring"
+  common_labels = merge(
+    var.tags,
+    {
+      "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/part-of"    = "spacelift-monitoring"
+      "environment"                   = var.environment
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.12"
-    }
-  }
+  )
+  
+  prometheus_name     = "${local.name_prefix}-prometheus"
+  grafana_name        = "${local.name_prefix}-grafana"
+  exporter_name       = "${local.name_prefix}-exporter"
+  alertmanager_name   = "${local.name_prefix}-alertmanager"
+  backup_name         = "${local.name_prefix}-backup"
 }
 
 # Data sources for existing GKE cluster
@@ -29,32 +30,18 @@ data "google_container_cluster" "primary" {
   project  = var.project_id
 }
 
-# Kubernetes provider configuration
-provider "kubernetes" {
-  host                   = "https://${data.google_container_cluster.primary.endpoint}"
-  token                  = data.google_client_config.default.access_token
-  cluster_ca_certificate = base64decode(data.google_container_cluster.primary.master_auth.0.cluster_ca_certificate)
-}
-
-# Helm provider configuration  
-provider "helm" {
-  kubernetes {
-    host                   = "https://${data.google_container_cluster.primary.endpoint}"
-    token                  = data.google_client_config.default.access_token
-    cluster_ca_certificate = base64decode(data.google_container_cluster.primary.master_auth.0.cluster_ca_certificate)
-  }
-}
-
 # Create monitoring namespace
 resource "kubernetes_namespace" "monitoring" {
   metadata {
     name = var.monitoring_namespace
-    labels = {
-      name                = var.monitoring_namespace
-      "app.kubernetes.io/name"       = "spacelift-monitoring"
-      "app.kubernetes.io/component"  = "monitoring"
-      "app.kubernetes.io/managed-by" = "terraform"
-    }
+    labels = merge(
+      local.common_labels,
+      {
+        name                           = var.monitoring_namespace
+        "app.kubernetes.io/name"       = local.name_prefix
+        "app.kubernetes.io/component"  = "namespace"
+      }
+    )
   }
 }
 
@@ -130,6 +117,34 @@ resource "kubernetes_cluster_role_binding" "monitoring" {
   }
 }
 
+# Random password for Grafana admin user
+resource "random_password" "grafana_admin" {
+  count   = var.enable_prometheus ? 1 : 0
+  length  = 24
+  special = true
+}
+
+# Kubernetes secret for Grafana admin credentials
+resource "kubernetes_secret" "grafana_admin" {
+  count = var.enable_prometheus ? 1 : 0
+
+  metadata {
+    name      = "grafana-admin-credentials"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      "app.kubernetes.io/name"      = "grafana"
+      "app.kubernetes.io/component" = "secrets"
+    }
+  }
+
+  data = {
+    admin-user     = "admin"
+    admin-password = random_password.grafana_admin[0].result
+  }
+
+  type = "Opaque"
+}
+
 # Kubernetes secret for Spacelift API credentials
 resource "kubernetes_secret" "spacelift_api" {
   count = var.create_spacelift_secret ? 1 : 0
@@ -180,10 +195,15 @@ resource "helm_release" "prometheus" {
     evaluation_interval   = var.prometheus_evaluation_interval
   })]
 
+  timeout = 2400
+  wait    = true
+  wait_for_jobs = true
+
   depends_on = [
     kubernetes_namespace.monitoring,
     kubernetes_service_account.monitoring,
-    kubernetes_cluster_role_binding.monitoring
+    kubernetes_cluster_role_binding.monitoring,
+    kubernetes_secret.grafana_admin
   ]
 }
 
@@ -375,8 +395,29 @@ resource "kubernetes_service" "spacelift_exporter" {
   depends_on = [kubernetes_deployment.spacelift_exporter]
 }
 
-# ServiceMonitor for Prometheus to scrape Spacelift Exporter
-resource "kubernetes_manifest" "spacelift_exporter_servicemonitor" {
+# ConfigMap for Spacelift Grafana Dashboard
+resource "kubernetes_config_map" "spacelift_dashboard" {
+  count = var.enable_prometheus && var.enable_spacelift_exporter ? 1 : 0
+
+  metadata {
+    name      = "spacelift-dashboard"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+    labels = {
+      "grafana_dashboard" = "1"
+      "app.kubernetes.io/name"      = "spacelift-monitoring"
+      "app.kubernetes.io/component" = "dashboard"
+    }
+  }
+
+  data = {
+    "spacelift-dashboard.json" = file("${path.module}/dashboards/spacelift-dashboard.json")
+  }
+
+  depends_on = [kubernetes_namespace.monitoring]
+}
+
+# ServiceMonitor for Spacelift Exporter to enable Prometheus scraping
+resource "kubernetes_manifest" "spacelift_service_monitor" {
   count = var.enable_spacelift_exporter && var.enable_prometheus ? 1 : 0
 
   manifest = {
@@ -389,6 +430,7 @@ resource "kubernetes_manifest" "spacelift_exporter_servicemonitor" {
         "app.kubernetes.io/name"      = "spacelift-exporter"
         "app.kubernetes.io/component" = "exporter"
         "prometheus"                  = "kube-prometheus"
+        "release"                     = "prometheus"
       }
     }
     spec = {
@@ -398,14 +440,12 @@ resource "kubernetes_manifest" "spacelift_exporter_servicemonitor" {
           "app.kubernetes.io/component" = "exporter"
         }
       }
-      endpoints = [
-        {
-          port           = "metrics"
-          interval       = var.prometheus_scrape_interval
-          path           = "/metrics"
-          scrapeTimeout  = "30s"
-        }
-      ]
+      endpoints = [{
+        port     = "metrics"
+        interval = var.prometheus_scrape_interval
+        path     = "/metrics"
+        scrapeTimeout = "30s"
+      }]
     }
   }
 
@@ -449,7 +489,7 @@ resource "kubernetes_network_policy" "monitoring" {
     }
 
     egress {
-      to {}
+      # Allow all egress traffic (pods can communicate outbound)
     }
   }
 

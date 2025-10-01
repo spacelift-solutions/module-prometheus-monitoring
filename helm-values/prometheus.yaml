@@ -14,9 +14,9 @@ commonLabels:
 # Prometheus Operator Configuration
 prometheusOperator:
   enabled: true
+  # Let the operator create and manage its own service account
   serviceAccount:
-    create: false
-    name: "${service_account}"
+    create: true
   
   # Security Context
   securityContext:
@@ -68,10 +68,9 @@ prometheus:
       fsGroup: 65534
       runAsGroup: 65534
     
-    # Service Account
+    # Service Account - let Prometheus create its own
     serviceAccount:
-      create: false
-      name: "${service_account}"
+      create: true
     
     # External URL
     externalUrl: "${external_url}"
@@ -100,7 +99,7 @@ prometheus:
     probeSelector: {}
     probeNamespaceSelector: {}
     
-    # Additional Scrape Configs for Spacelift Exporter
+    # Additional Scrape Configs for Spacelift Exporter (backup if ServiceMonitor doesn't work)
     additionalScrapeConfigs:
       - job_name: 'spacelift-exporter'
         static_configs:
@@ -158,8 +157,11 @@ prometheus:
 grafana:
   enabled: true
   
-  # Admin Configuration
-  adminPassword: "admin123!" # Should be changed in production
+  # Admin Configuration - password will be set from existing secret
+  admin:
+    existingSecret: "grafana-admin-credentials"
+    userKey: admin-user
+    passwordKey: admin-password
   
   # Storage Configuration
   persistence:
@@ -169,10 +171,9 @@ grafana:
     accessModes:
       - ReadWriteOnce
   
-  # Service Account
+  # Service Account - let Grafana create its own
   serviceAccount:
-    create: false
-    name: "${service_account}"
+    create: true
   
   # Security Context
   securityContext:
@@ -318,19 +319,17 @@ alertmanager:
       runAsUser: 65534
       fsGroup: 65534
     
-    # Service Account
+    # Service Account - let AlertManager create its own
     serviceAccount:
-      create: false
-      name: "${service_account}"
+      create: true
 
 # Node Exporter Configuration
 nodeExporter:
   enabled: true
   
-  # Service Account
+  # Service Account - let nodeExporter create its own
   serviceAccount:
-    create: false
-    name: "${service_account}"
+    create: true
 
 # Kube State Metrics Configuration
 kubeStateMetrics:

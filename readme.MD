@@ -489,7 +489,9 @@ The module includes comprehensive health monitoring:
 │   ├── basic/                  # Basic usage example
 │   │   ├── main.tf
 │   │   ├── variables.tf
+│   │   └── terraform.tfvars.example
 .
+
 ## Changelog
 
 ### v1.0.0 (Latest)
@@ -530,6 +532,9 @@ When reporting issues, please include:
 - Error messages and logs
 - Minimal reproduction case
 
+## Variables Reference
+
+<!-- BEGIN_TF_DOCS -->
 ## Requirements
 
 | Name | Version |
@@ -571,5 +576,7 @@ When reporting issues, please include:
 | spacelift_exporter_service_url | Internal service URL for Spacelift exporter |
 | monitoring_endpoints | All monitoring service endpoints |
 | monitoring_configuration | Summary of monitoring stack configuration |
+
+<!-- END_TF_DOCS -->
 
 ---
